@@ -1,0 +1,101 @@
+/*
+=========================================================================================================================
+product report
+=========================================================================================================================
+
+purpose: 
+        - this report consolidates key product metrics and behaviours.
+        - creating view based on the result set of this script
+
+highlights:
+        1. gathers essential fields such as product name, category, subcategory, and cost.
+		2. segments products by revenue to identify high-performers, mid-range, or low- range performers.
+		3. aggregates product- level metrics:
+		    - total orders
+			- total sales
+			- total quantity sold
+			- total customers (unique)
+			- lifespan (in months)
+		4. calculate valuable kpi's
+		     - recency(months since last scale)
+			 - average order revenue(AOR)
+			 - average monthly revenue
+===============================================================================================================================
+*/
+
+
+-- building base report
+  
+--------------------------------------------------------------------------------------------------------------------------------------------
+
+create view gold.report_products as
+
+  with base_report as 
+(
+select  
+   dp.product_name,
+   dp.category,
+   dp.subcategory,
+   dp.cost,
+   fs.order_date,
+   fs.order_number,
+   fs.sales_amount,
+   fs.quantity,
+   fs.customer_key
+from gold.fact_sales fs
+left join gold.dim_products dp
+on fs.product_key = dp.product_key
+where order_date is not null
+   )
+, product_aggregation as
+   (select 
+       product_name,
+       category,
+       subcategory,
+       cost,
+	   count(distinct order_number) as total_orders,
+	   sum(sales_amount) as total_sales,
+	   sum(quantity) as total_quantity,
+	   count(distinct customer_key) as total_customers,
+	   max(order_date) as last_sale_date,
+	   datediff(month, min(order_date), max(order_date)) as lifespan,
+	   round(avg(cast(sales_amount as float)/nullif(quantity,0)),1) as avg_selling_price
+   from base_report 
+   group by 
+       product_name,
+       category,
+       subcategory,
+       cost
+   )
+
+  select 
+       product_name,
+       category,
+       subcategory,
+       cost,
+	   total_orders,
+	   total_sales,
+	   total_quantity,
+	   total_customers,
+	   last_sale_date,
+	   lifespan,
+	case 
+	     when total_sales > 40000 then 'high performers'
+		 when total_sales between 10000 and 40000 then 'mid range'
+		 when total_sales < 10000 then 'low performers'
+	end as product_segment,
+    datediff(month, last_sale_date, GETDATE()) as recency,
+  -- average order revenue(AOR)
+  case 
+      when total_sales = 0 or total_orders = 0 then 0
+      else total_sales/ total_orders
+  end as average_order_revenue,
+  case 
+       when total_sales = 0 or lifespan = 0 then 0
+	   else total_sales/lifespan 
+ end as average_monthly_revenue
+ from product_aggregation
+ 
+
+
+ select * from gold.report_products
